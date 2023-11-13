@@ -11,7 +11,7 @@ from dynaconf import Dynaconf, Validator
 def post(settings: Dynaconf) -> Dict[str, Any]:
     """The dynaconf post hook is called after all the settings are loaded and set.
 
-    Post hook is necessary when a setting key depends conditionally on a previouslys et variable.
+    Post hook is necessary when a setting key depends conditionally on a previously set variable.
 
     settings: A read-only copy of the django.conf.settings
     returns: a dictionary to be merged to django.conf.settings
@@ -26,7 +26,9 @@ def post(settings: Dynaconf) -> Dict[str, Any]:
     data.update(configure_ldap(settings))
     data.update(configure_logging(settings))
     data.update(configure_keycloak(settings))
-    data.update(configure_socialauth(settings))
+    data.update(configure_githubauth(settings))
+    data.update(configure_azureadauth(settings))
+    data.update(configure_gitlabauth(settings))
     data.update(configure_cors(settings))
     data.update(configure_pulp_ansible(settings))
     data.update(configure_authentication_backends(settings))
@@ -175,8 +177,8 @@ def configure_keycloak(settings: Dynaconf) -> Dict[str, Any]:
     return data
 
 
-def configure_socialauth(settings: Dynaconf) -> Dict[str, Any]:
-    """Configure social auth settings for galaxy.
+def configure_githubauth(settings: Dynaconf) -> Dict[str, Any]:
+    """Configure github auth settings for galaxy.
 
     This function returns a dictionary that will be merged to the settings.
     """
@@ -234,6 +236,150 @@ def configure_socialauth(settings: Dynaconf) -> Dict[str, Any]:
             'social_core.pipeline.social_auth.social_user',
             'galaxy_ng.social.pipeline.user.get_username',
             'galaxy_ng.social.pipeline.user.create_user',
+            'social_core.pipeline.social_auth.associate_user',
+            'social_core.pipeline.social_auth.load_extra_data',
+            'social_core.pipeline.user.user_details'
+        ]
+
+    return data
+
+
+def configure_azureadauth(settings: Dynaconf) -> Dict[str, Any]:
+    """Configure AzureAD Tenant auth settings for galaxy.
+
+    This function returns a dictionary that will be merged to the settings.
+    """
+
+    data = {}
+
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY = settings.get(
+        "SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY", default=None)
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET = settings.get(
+        "SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET", default=None)
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID = settings.get(
+        "SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID", default=None)
+
+    if all(
+        [
+            SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY,
+            SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET,
+            SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID
+        ]
+    ):
+
+        # Add to installed apps
+        data["INSTALLED_APPS"] = ["social_django", "dynaconf_merge"]
+
+        # Make sure the UI knows to do ext auth
+        data["GALAXY_FEATURE_FLAGS__external_authentication"] = True
+        data["SOCIAL_AUTH_JSONFIELD_ENABLED"] = settings.get(
+            "SOCIAL_AUTH_JSONFIELD_ENABLED", default=True)
+        data["SOCIAL_AUTH_LOGIN_REDIRECT_URL"] = settings.get(
+            "SOCIAL_AUTH_LOGIN_REDIRECT_URL", default='/ui/')
+        data["KEYCLOAK_ROLE_TOKEN_CLAIM"] = settings.get(
+            "KEYCLOAK_ROLE_TOKEN_CLAIM", default='roles')
+        data["KEYCLOAK_ADMIN_ROLE"] = settings.get("KEYCLOAK_ADMIN_ROLE", default='GalaxyAdmin')
+        data["KEYCLOAK_GROUP_TOKEN_CLAIM"] = settings.get(
+            "KEYCLOAK_GROUP_TOKEN_CLAIM", default='groups')
+        data["SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_RESOURCE"] = settings.get(
+            "SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_RESOURCE", default='https://graph.microsoft.com/')
+
+        backends = settings.get("AUTHENTICATION_BACKENDS", default=[])
+        backends.append("social_core.backends.azuread_tenant.AzureADTenantOAuth2")
+        backends.append("dynaconf_merge")
+        data["AUTHENTICATION_BACKENDS"] = backends
+        data["DEFAULT_AUTHENTICATION_BACKENDS"] = backends
+        data["GALAXY_AUTHENTICATION_BACKENDS"] = backends
+
+        data['DEFAULT_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        data['GALAXY_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        data['REST_FRAMEWORK_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        data['SOCIAL_AUTH_PIPELINE'] = [
+            'social_core.pipeline.social_auth.social_details',
+            'social_core.pipeline.social_auth.social_uid',
+            'social_core.pipeline.social_auth.social_user',
+            'social_core.pipeline.user.get_username',
+            'social_core.pipeline.social_auth.associate_by_email',
+            'social_core.pipeline.user.create_user',
+            'social_core.pipeline.social_auth.associate_user',
+            'social_core.pipeline.social_auth.load_extra_data',
+            'social_core.pipeline.user.user_details',
+            'galaxy_ng.app.pipelines.user_role',
+            'galaxy_ng.app.pipelines.user_group'
+        ]
+
+    return data
+
+
+def configure_gitlabauth(settings: Dynaconf) -> Dict[str, Any]:
+    """Configure social auth settings for galaxy.
+
+    This function returns a dictionary that will be merged to the settings.
+    """
+
+    data = {}
+    SOCIAL_AUTH_GITLAB_KEY = settings.get("SOCIAL_AUTH_GITLAB_KEY", default=None)
+    SOCIAL_AUTH_GITLAB_SECRET = settings.get("SOCIAL_AUTH_GITLAB_SECRET", default=None)
+
+    if all([SOCIAL_AUTH_GITLAB_KEY, SOCIAL_AUTH_GITLAB_SECRET]):
+
+        # Add to installed apps
+        data["INSTALLED_APPS"] = ["social_django", "dynaconf_merge"]
+
+        # Make sure the UI knows to do ext auth
+        data["GALAXY_FEATURE_FLAGS__external_authentication"] = True
+        data["SOCIAL_AUTH_GITLAB_API_URL"] = \
+            settings.get('SOCIAL_AUTH_GITLAB_API_URL', default='https://gitlab.com')
+        backends = settings.get("AUTHENTICATION_BACKENDS", default=[])
+        backends.append("social_core.backends.gitlab.GitLabOAuth2")
+        backends.append("dynaconf_merge")
+        data["AUTHENTICATION_BACKENDS"] = backends
+        data["DEFAULT_AUTHENTICATION_BACKENDS"] = backends
+        data["GALAXY_AUTHENTICATION_BACKENDS"] = backends
+
+        data['DEFAULT_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        data['GALAXY_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        data['REST_FRAMEWORK_AUTHENTICATION_CLASSES'] = [
+            "rest_framework.authentication.SessionAuthentication",
+            "rest_framework.authentication.TokenAuthentication",
+            "rest_framework.authentication.BasicAuthentication",
+        ]
+
+        # Override the get_username and create_user steps
+        # to conform to our super special user validation
+        # requirements
+        data['SOCIAL_AUTH_PIPELINE'] = [
+            'social_core.pipeline.social_auth.social_details',
+            'social_core.pipeline.social_auth.social_uid',
+            'social_core.pipeline.social_auth.social_user',
+            'social_core.pipeline.user.get_username',
+            'social_core.pipeline.social_auth.associate_by_email',
+            'social_core.pipeline.user.create_user',
             'social_core.pipeline.social_auth.associate_user',
             'social_core.pipeline.social_auth.load_extra_data',
             'social_core.pipeline.user.user_details'

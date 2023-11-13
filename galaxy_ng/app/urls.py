@@ -2,6 +2,9 @@ from django.conf import settings
 from django.urls import re_path as url
 from django.shortcuts import redirect
 from django.urls import include, path
+from social_core.backends.oauth import BaseOAuth1, BaseOAuth2
+from social_core.backends.utils import load_backends
+from social_django.utils import load_strategy, psa
 
 from . import views
 from galaxy_ng.app.api import urls as api_urls
@@ -45,6 +48,7 @@ urlpatterns = [
         name="swagger-ui",
     ),
     path("healthz", views.health_view),
+    path("", include("social_django.urls", namespace="social")),
 ]
 
 if settings.get("API_ROOT") != "/pulp/":
@@ -56,9 +60,20 @@ if settings.get("API_ROOT") != "/pulp/":
     )
 
 if settings.get("SOCIAL_AUTH_KEYCLOAK_KEY"):
-    urlpatterns.append(url("", include("social_django.urls", namespace="social")))
-    urlpatterns.append(path("login/",
-                       lambda request: redirect("/login/keycloak/", permanent=False)))
-
-if settings.get("SOCIAL_AUTH_GITHUB_KEY"):
-    urlpatterns.append(url('', include('social_django.urls', namespace='github')))
+    urlpatterns.append(path("login/", lambda request: redirect("/login/keycloak/",
+                                                               permanent=False)))
+elif settings.get("SOCIAL_AUTH_GITHUB_KEY"):
+    urlpatterns.append(path("login/", lambda request: redirect("/login/github/",
+                                                               permanent=False)))
+elif settings.get("SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY"):
+    urlpatterns.append(path("login/", lambda request: redirect("/login/azuread-tenant-oauth2/",
+                                                               permanent=False)))
+elif settings.get("SOCIAL_AUTH_AMAZON_KEY"):
+    urlpatterns.append(path("login/", lambda request: redirect("/login/amazon/",
+                                                               permanent=False)))
+elif settings.get("SOCIAL_AUTH_GITLAB_KEY"):
+    urlpatterns.append(path("login/", lambda request: redirect("/login/gitlab/",
+                                                               permanent=False)))
+elif settings.get("SOCIAL_AUTH_GOOGLE_OAUTH2_KEY"):
+    urlpatterns.append(path("login/", lambda request: redirect("/login/google-oauth2/",
+                                                               permanent=False)))
