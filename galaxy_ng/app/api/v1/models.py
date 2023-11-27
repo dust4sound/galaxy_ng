@@ -1,7 +1,11 @@
 from django.db import models
+from django.contrib.postgres.search import SearchVectorField
+from django.contrib.postgres.indexes import GinIndex
 
 from galaxy_ng.app.models import Namespace
 from galaxy_ng.app.models.auth import User
+
+from pulpcore.plugin.models import Task
 
 
 """
@@ -115,6 +119,16 @@ class LegacyNamespace(models.Model):
         return self.name
 
 
+class LegacyRoleTag(models.Model):
+    name = models.CharField(max_length=64, unique=True, editable=False)
+
+    def __repr__(self):
+        return f'<LegacyRoleTag: {self.name}>'
+
+    def __str__(self):
+        return self.name
+
+
 class LegacyRole(models.Model):
     """
     A legacy v1 role, which is just an index for github.
@@ -154,6 +168,8 @@ class LegacyRole(models.Model):
         default=dict
     )
 
+    tags = models.ManyToManyField(LegacyRoleTag, editable=False, related_name="legacyrole")
+
     def __repr__(self):
         return f'<LegacyRole: {self.namespace.name}.{self.name}>'
 
@@ -169,3 +185,48 @@ class LegacyRoleDownloadCount(models.Model):
     )
 
     count = models.IntegerField(default=0)
+
+
+class LegacyRoleSearchVector(models.Model):
+    role = models.OneToOneField(
+        LegacyRole,
+        on_delete=models.CASCADE,
+        primary_key=True,
+    )
+    search_vector = SearchVectorField(default="")
+    modified = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = (GinIndex(fields=["search_vector"]),)
+
+
+class LegacyRoleImport(models.Model):
+    role = models.ForeignKey(
+        'LegacyRole',
+        related_name='role',
+        editable=True,
+        on_delete=models.CASCADE,
+        null=True
+    )
+    task = models.OneToOneField(
+        Task, on_delete=models.CASCADE, editable=False, related_name="+", primary_key=True
+    )
+    messages = models.JSONField(default=list, editable=False)
+
+    class Meta:
+        ordering = ["task__pulp_created"]
+
+    def add_log_record(self, log_record, state=None):
+        """
+        Records a single log message but does not save the LegacyRoleImport object.
+
+        Args:
+            log_record(logging.LogRecord): The logging record to record on messages.
+
+        """
+        self.messages.append({
+            "state": state,
+            "message": log_record.msg,
+            "level": log_record.levelname,
+            "time": log_record.created
+        })

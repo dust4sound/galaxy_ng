@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404
 
 from rest_framework import mixins
 from rest_framework import viewsets
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.settings import perform_import
 from rest_framework.pagination import PageNumberPagination
@@ -20,16 +21,23 @@ from galaxy_ng.app.api.v1.tasks import (
 from galaxy_ng.app.api.v1.models import (
     LegacyRole,
     LegacyRoleDownloadCount,
+    LegacyRoleImport,
 )
 from galaxy_ng.app.api.v1.serializers import (
     LegacyImportSerializer,
+    LegacyImportListSerializer,
+    LegacyRoleImportDetailSerializer,
     LegacyRoleSerializer,
+    LegacyRoleUpdateSerializer,
     LegacyRoleContentSerializer,
     LegacyRoleVersionsSerializer,
 )
 
 from galaxy_ng.app.api.v1.viewsets.tasks import LegacyTasksMixin
-from galaxy_ng.app.api.v1.filtersets import LegacyRoleFilter
+from galaxy_ng.app.api.v1.filtersets import (
+    LegacyRoleFilter,
+    LegacyRoleImportFilter,
+)
 
 
 GALAXY_AUTHENTICATION_CLASSES = perform_import(
@@ -93,6 +101,55 @@ class LegacyRolesViewSet(viewsets.ModelViewSet):
                             raise e
 
         return super().list(request)
+
+    def update(self, request, pk=None):
+        role = self.get_object()
+        serializer = LegacyRoleUpdateSerializer(role, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        changed = {}
+        for key, newval in serializer.validated_data.items():
+
+            # repositories are special ...
+            if key == 'repository':
+                if not role.full_metadata.get('repository'):
+                    changed['repository'] = {}
+                    role.full_metadata['repository'] = {}
+                for subkey, subval in newval.items():
+                    if role.full_metadata.get(key, {}).get(subkey) != subval:
+                        if key not in changed:
+                            changed[key] = {}
+                        role.full_metadata[key][subkey] = subval
+                        changed[key][subkey] = subval
+                continue
+
+            # github_repo should set repository.name?
+            if key == 'github_repo':
+                if not role.full_metadata.get('repository'):
+                    changed['repository'] = {}
+                    role.full_metadata['repository'] = {}
+                old_name = role.full_metadata['repository'].get('name')
+                role.full_metadata['repository']['name'] = newval
+                role.full_metadata['repository']['original_name'] = old_name
+
+            if role.full_metadata.get(key) != newval:
+                role.full_metadata[key] = newval
+                changed[key] = newval
+
+            # TODO - get rid of github_reference?
+            if key == 'github_branch':
+                key = 'github_reference'
+                if role.full_metadata.get(key) != newval:
+                    role.full_metadata[key] = newval
+                    changed[key] = newval
+
+        # only save if changes made
+        if changed:
+            role.save()
+            return Response(changed, status=200)
+
+        return Response(changed, status=204)
 
     def destroy(self, request, pk=None):
         """Delete a single role."""
@@ -165,15 +222,49 @@ class LegacyRoleVersionsViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMix
         return get_object_or_404(LegacyRole, id=self.kwargs["pk"])
 
 
-class LegacyRoleImportsViewSet(viewsets.GenericViewSet, LegacyTasksMixin):
+class LegacyRoleImportsViewSet(viewsets.ModelViewSet, LegacyTasksMixin):
     """Legacy role imports."""
 
-    serializer_class = LegacyImportSerializer
     permission_classes = [LegacyAccessPolicy]
     authentication_classes = GALAXY_AUTHENTICATION_CLASSES
+    queryset = LegacyRoleImport.objects.order_by('task__pulp_created')
+
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = LegacyRoleImportFilter
+
+    def get_serializer_class(self):
+        if self.request.query_params.get('id') or self.request.query_params.get('detail'):
+            return LegacyRoleImportDetailSerializer
+        return LegacyImportListSerializer
+
+    def list(self, request, *args, **kwargs):
+        """
+        List view for import tasks.
+
+        v1's list view shows summaries, however if the "id"
+        parameter is given it returns a detail view that includes
+        log messages.
+        """
+        if request.query_params.get('id'):
+            return self.get_task(request, id=int(request.query_params['id']))
+        return super(LegacyRoleImportsViewSet, self).list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Detail view for an import task.
+        """
+        return self.get_task(request, id=int(kwargs['pk']))
 
     def create(self, request):
-        serializer = self.get_serializer(data=request.data)
+        """
+        Create view for imports.
+
+        Starts a new import task by dispatching it
+        to the pulp tasking system and translating the
+        task UUID to an integer to retain v1 compatibility.
+        """
+        serializer_class = LegacyImportSerializer
+        serializer = serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         kwargs = dict(serializer.validated_data)
 

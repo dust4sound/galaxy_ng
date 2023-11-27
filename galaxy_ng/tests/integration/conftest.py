@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import yaml
 
 import pytest
 from orionutils.utils import increment_version
@@ -81,6 +82,8 @@ repositories: tests verifying custom repositories
 all: tests that are unmarked and should pass in all deployment modes
 galaxy_stage_ansible: tests that run against galaxy-stage.ansible.com
 installer_smoke_test: smoke tests to validate AAP installation (VM)
+load_data: tests that load data that will be verified after upgrade or backup/restore
+verify_data: tests that verify the data previously loaded by load_data test
 """
 
 logger = logging.getLogger(__name__)
@@ -532,6 +535,28 @@ def generate_test_artifact(ansible_config):
     delete_collection(gc_admin, namespace=artifact.namespace, collection=artifact.name)
 
 
+@pytest.fixture(scope="function")
+def keep_generated_test_artifact(ansible_config):
+    """
+    Generates a test artifact
+    """
+    github_user_username = GALAXY_STAGE_ANSIBLE_PROFILES["github_user"]["username"]
+    expected_ns = f"{github_user_username}".replace("-", "_")
+    test_version = generate_random_artifact_version()
+    return build_collection(
+        "skeleton",
+        config={"namespace": expected_ns, "version": test_version, "tags": ["tools"]},
+    )
+
+
+@pytest.fixture(scope="session")
+def data():
+    path = 'galaxy_ng/tests/integration/load_data.yaml'
+    with open(path, 'r') as yaml_file:
+        data = yaml.safe_load(yaml_file)
+    return data
+
+
 def min_hub_version(ansible_config, spec):
     version = get_hub_version(ansible_config)
     return Requirement.parse(f"galaxy_ng<{spec}").specifier.contains(version)
@@ -545,6 +570,11 @@ def max_hub_version(ansible_config, spec):
 def is_hub_4_5(ansible_config):
     hub_version = get_hub_version(ansible_config)
     return parse_version(hub_version) < parse_version('4.6')
+
+
+def is_hub_4_7_or_higher(ansible_config):
+    hub_version = get_hub_version(ansible_config)
+    return parse_version(hub_version) >= parse_version('4.7')
 
 
 # add the "all" label to any unmarked tests

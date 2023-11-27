@@ -25,6 +25,25 @@ INSTALLED_APPS = [
 ]
 
 
+LOGGING = {
+    "loggers": {
+        "galaxy_ng.app.api.v1.tasks.legacy_role_import": {
+            "level": "INFO",
+            "handlers": ["legacyrole_import"],
+            "propagate": False,
+        }
+    },
+    "handlers": {
+        "legacyrole_import": {
+            "level": "DEBUG",
+            "class": "galaxy_ng.app.api.v1.logutils.LegacyRoleImportHandler",
+            "formatter": "simple",
+        }
+    },
+    "dynaconf_merge": True,
+}
+
+
 AUTH_USER_MODEL = 'galaxy.User'
 
 # FIXME(cutwater): 1. Rename GALAXY_API_ROOT in pulp-ansible to ANSIBLE_API_ROOT
@@ -244,7 +263,7 @@ AUTHENTICATION_BACKEND_PRESETS_DATA = {
 GALAXY_ENABLE_LEGACY_ROLES = False
 
 SOCIAL_AUTH_GITHUB_BASE_URL = os.environ.get('SOCIAL_AUTH_GITHUB_BASE_URL', 'https://github.com')
-SOCIAL_AUTH_GITHUB_API_URL = os.environ.get('SOCIAL_AUTH_GITHUB_BASE_URL', 'https://api.github.com')
+SOCIAL_AUTH_GITHUB_API_URL = os.environ.get('SOCIAL_AUTH_GITHUB_API_URL', 'https://api.github.com')
 SOCIAL_AUTH_GITHUB_KEY = os.environ.get('SOCIAL_AUTH_GITHUB_KEY')
 SOCIAL_AUTH_GITHUB_SECRET = os.environ.get('SOCIAL_AUTH_GITHUB_SECRET')
 
@@ -271,3 +290,7 @@ GALAXY_METRICS_COLLECTION_REDHAT_USERNAME = None
 GALAXY_METRICS_COLLECTION_REDHAT_PASSWORD = None
 # RH account's org id (required for x-rh-identity auth type)
 GALAXY_METRICS_COLLECTION_ORG_ID = None
+
+# When set to True will enable the DYNAMIC settungs feature
+# Individual allowed dynamic keys are set on ./dynamic_settings.py
+GALAXY_DYNAMIC_SETTINGS = False

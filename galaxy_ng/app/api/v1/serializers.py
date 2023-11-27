@@ -1,3 +1,5 @@
+import datetime
+
 from rest_framework import serializers
 
 from pulpcore.plugin.util import get_url
@@ -6,9 +8,13 @@ from galaxy_ng.app.models.auth import User
 from galaxy_ng.app.models.namespace import Namespace
 from galaxy_ng.app.utils.rbac import get_v3_namespace_owners
 from galaxy_ng.app.api.v1.models import LegacyNamespace
-from galaxy_ng.app.api.v1.models import LegacyRole
+from galaxy_ng.app.api.v1.models import LegacyRole, LegacyRoleTag
 from galaxy_ng.app.api.v1.models import LegacyRoleDownloadCount
 from galaxy_ng.app.api.v1.utils import sort_versions
+
+from galaxy_ng.app.utils.galaxy import (
+    uuid_to_int
+)
 
 
 class LegacyNamespacesSerializer(serializers.ModelSerializer):
@@ -72,6 +78,11 @@ class LegacyNamespacesSerializer(serializers.ModelSerializer):
         return {'owners': owners, 'provider_namespaces': providers}
 
     def get_avatar_url(self, obj):
+
+        # prefer the provider avatar url
+        if obj.namespace and obj.namespace.avatar_url:
+            return obj.namespace.avatar_url
+
         url = f'https://github.com/{obj.name}.png'
         return url
 
@@ -114,6 +125,7 @@ class LegacyUserSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
     username = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
+    github_id = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -127,7 +139,7 @@ class LegacyUserSerializer(serializers.ModelSerializer):
             'full_name',
             'date_joined',
             'avatar_url',
-            # 'active'
+            'github_id',
         ]
 
     def get_username(self, obj):
@@ -166,6 +178,23 @@ class LegacyUserSerializer(serializers.ModelSerializer):
             username = obj.username
         url = f'https://github.com/{username}.png'
         return url
+
+    def get_github_id(self, obj):
+
+        # have to defer this import because of the other
+        # deployment profiles trying to access the missing
+        # database table.
+        from social_django.models import UserSocialAuth
+
+        try:
+            social_user = UserSocialAuth.objects.filter(user=obj).first()
+            if not social_user:
+                return None
+            return int(social_user.uid)
+        except Exception:
+            return None
+
+        return None
 
 
 class LegacyRoleSerializer(serializers.ModelSerializer):
@@ -313,18 +342,30 @@ class LegacyRoleSerializer(serializers.ModelSerializer):
                 'pulp_href': pulp_href
             }
 
+        # FIXME - repository is a bit hacky atm
+        repository = {}
+        if obj.full_metadata.get('repository'):
+            repository = obj.full_metadata.get('repository')
+        if not repository.get('name'):
+            repository['name'] = obj.full_metadata.get('github_repo')
+        if not repository.get('original_name'):
+            repository['original_name'] = obj.full_metadata.get('github_repo')
+
+        # prefer the provider avatar url
+        avatar_url = f'https://github.com/{obj.namespace.name}.png'
+        if obj.namespace and obj.namespace.namespace:
+            if obj.namespace.namespace.avatar_url:
+                avatar_url = obj.namespace.namespace.avatar_url
+
         return {
             'dependencies': dependencies,
             'namespace': {
                 'id': obj.namespace.id,
                 'name': obj.namespace.name,
-                'avatar_url': f'https://github.com/{obj.namespace.name}.png'
+                'avatar_url': avatar_url
             },
             'provider_namespace': provider_ns,
-            'repository': {
-                'name': obj.name,
-                'original_name': obj.full_metadata.get('github_repo')
-            },
+            'repository': repository,
             'tags': tags,
             'versions': versions
         }
@@ -334,6 +375,40 @@ class LegacyRoleSerializer(serializers.ModelSerializer):
         if counter:
             return counter.count
         return 0
+
+
+class LegacyRoleRepositoryUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, allow_blank=False, max_length=50)
+    original_name = serializers.CharField(required=False, allow_blank=False, max_length=50)
+
+    def is_valid(self, raise_exception=False):
+        # Check for any unexpected fields
+        extra_fields = set(self.initial_data.keys()) - set(self.fields.keys())
+        if extra_fields:
+            self._errors = {field: ["Unexpected field."] for field in extra_fields}
+        else:
+            # Continue with the original validation logic
+            super(serializers.Serializer, self).is_valid(raise_exception=raise_exception)
+
+        return not bool(self._errors)
+
+
+class LegacyRoleUpdateSerializer(serializers.Serializer):
+    github_user = serializers.CharField(required=False, allow_blank=False, max_length=50)
+    github_repo = serializers.CharField(required=False, allow_blank=False, max_length=50)
+    github_branch = serializers.CharField(required=False, allow_blank=False, max_length=50)
+    repository = LegacyRoleRepositoryUpdateSerializer(required=False)
+
+    def is_valid(self, raise_exception=False):
+        # Check for any unexpected fields
+        extra_fields = set(self.initial_data.keys()) - set(self.fields.keys())
+        if extra_fields:
+            self._errors = {field: ["Unexpected field."] for field in extra_fields}
+        else:
+            # Continue with the original validation logic
+            super(serializers.Serializer, self).is_valid(raise_exception=raise_exception)
+
+        return not bool(self._errors)
 
 
 class LegacyRoleContentSerializer(serializers.ModelSerializer):
@@ -507,6 +582,56 @@ class LegacyImportSerializer(serializers.Serializer):
         ]
 
 
+class LegacyImportListSerializer(serializers.Serializer):
+
+    id = serializers.SerializerMethodField()
+    pulp_id = serializers.SerializerMethodField()
+    created = serializers.SerializerMethodField()
+    modified = serializers.SerializerMethodField()
+    state = serializers.SerializerMethodField()
+    summary_fields = serializers.SerializerMethodField()
+
+    class Meta:
+        model = None
+        fields = [
+            'id',
+            'pulp_id',
+            'created',
+            'modified',
+            'state',
+            'summary_fields',
+        ]
+
+    def get_id(self, obj):
+        return uuid_to_int(str(obj.task.pulp_id))
+
+    def get_pulp_id(self, obj):
+        return obj.task.pulp_id
+
+    def get_created(self, obj):
+        return obj.task.pulp_created
+
+    def get_modified(self, obj):
+        return obj.task.pulp_last_updated
+
+    def get_state(self, obj):
+        state_map = {
+            'COMPLETED': 'SUCCESS'
+        }
+        state = obj.task.state.upper()
+        state = state_map.get(state, state)
+        return state
+
+    def get_summary_fields(self, obj):
+        return {
+            'request_username': obj.task.kwargs.get('request_username'),
+            'github_user': obj.task.kwargs.get('github_user'),
+            'github_repo': obj.task.kwargs.get('github_repo'),
+            'github_reference': obj.task.kwargs.get('github_reference'),
+            'alternate_role_name': obj.task.kwargs.get('alternate_role_name'),
+        }
+
+
 class LegacySyncTaskResponseSerializer(serializers.Serializer):
 
     task = serializers.CharField()
@@ -552,7 +677,11 @@ class LegacyTaskResultsSerializer(serializers.Serializer):
 
     class Meta:
         model = None
-        fields = ['id', 'state', 'summary_fields']
+        fields = [
+            'id',
+            'state',
+            'summary_fields'
+        ]
 
 
 class LegacyTaskDetailSerializer(serializers.Serializer):
@@ -562,3 +691,90 @@ class LegacyTaskDetailSerializer(serializers.Serializer):
     class Meta:
         model = None
         fields = ['results']
+
+
+class LegacyRoleImportDetailSerializer(serializers.Serializer):
+
+    STATE_MAP = {
+        'COMPLETED': 'SUCCESS'
+    }
+
+    MSG_TYPE_MAP = {
+        'RUNNING': 'INFO',
+        'WAITING': 'INFO',
+        'COMPLETED': 'SUCCESS'
+    }
+
+    id = serializers.SerializerMethodField()
+    pulp_id = serializers.SerializerMethodField()
+    role_id = serializers.SerializerMethodField()
+    state = serializers.SerializerMethodField()
+    error = serializers.SerializerMethodField()
+    summary_fields = serializers.SerializerMethodField()
+
+    class Meta:
+        model = None
+        fields = [
+            'id',
+            'pulp_id',
+            'state',
+            'role_id',
+            'summary_fields',
+        ]
+
+    def get_role_id(self, obj):
+        if obj.role:
+            return obj.role.id
+        return None
+
+    def get_state(self, obj):
+        task = obj.task
+        return self.STATE_MAP.get(task.state.upper(), task.state.upper())
+
+    def get_id(self, obj):
+        return uuid_to_int(str(obj.task.pulp_id))
+
+    def get_pulp_id(self, obj):
+        return str(obj.task.pulp_id)
+
+    def get_error(self, obj):
+        return {
+            'code': None,
+            'description': None,
+            'traceback': None
+        }
+
+    def get_summary_fields(self, obj):
+        task = obj.task
+
+        task_messages = []
+
+        for message in obj.messages:
+            msg_type = self.MSG_TYPE_MAP.get(message['level'], message['level'])
+            ts = datetime.datetime.utcfromtimestamp(message['time']).isoformat()
+            msg_state = self.STATE_MAP.get(message['state'].upper(), message['state'].upper())
+            msg = {
+                'id': ts,
+                'state': msg_state,
+                'message_type': msg_type,
+                'message_text': message['message']
+            }
+            task_messages.append(msg)
+
+        return {
+            'request_username': task.kwargs.get('request_username'),
+            'github_user': task.kwargs.get('github_user'),
+            'github_repo': task.kwargs.get('github_repo'),
+            'github_reference': task.kwargs.get('github_reference'),
+            'alternate_role_name': task.kwargs.get('alternate_role_name'),
+            'task_messages': task_messages
+        }
+
+
+class LegacyRoleTagSerializer(serializers.ModelSerializer):
+
+    count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = LegacyRoleTag
+        fields = ['name', 'count']

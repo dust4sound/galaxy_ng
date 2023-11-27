@@ -13,7 +13,7 @@ from setuptools.command.build_py import build_py as _BuildPyCommand
 from setuptools.command.sdist import sdist as _SDistCommand
 
 package_name = os.environ.get("GALAXY_NG_ALTERNATE_NAME", "galaxy-ng")
-version = "4.9.0dev"
+version = "4.10.0dev"
 
 
 class PrepareStaticCommand(Command):
@@ -111,7 +111,7 @@ def _format_pulp_requirement(plugin, specifier=None, ref=None, gh_namespace="pul
 
 
 requirements = [
-    "galaxy-importer>=0.4.14,<0.5.0",
+    "galaxy-importer>=0.4.16,<0.5.0",
     "pulpcore>=3.28.12,<3.29.0",
     "pulp_ansible>=0.20.0,<0.21.0",
     "django-prometheus>=2.0.0",
