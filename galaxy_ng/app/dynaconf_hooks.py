@@ -297,26 +297,6 @@ def configure_azureadauth(settings: Dynaconf) -> Dict[str, Any]:
         backends.append("social_core.backends.azuread_tenant.AzureADTenantOAuth2")
         backends.append("dynaconf_merge")
         data["AUTHENTICATION_BACKENDS"] = backends
-        data["DEFAULT_AUTHENTICATION_BACKENDS"] = backends
-        data["GALAXY_AUTHENTICATION_BACKENDS"] = backends
-
-        data['DEFAULT_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
-
-        data['GALAXY_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
-
-        data['REST_FRAMEWORK_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
 
         data['SOCIAL_AUTH_PIPELINE'] = [
             'social_core.pipeline.social_auth.social_details',
@@ -360,24 +340,6 @@ def configure_gitlabauth(settings: Dynaconf) -> Dict[str, Any]:
         data["AUTHENTICATION_BACKENDS"] = backends
         data["DEFAULT_AUTHENTICATION_BACKENDS"] = backends
         data["GALAXY_AUTHENTICATION_BACKENDS"] = backends
-
-        data['DEFAULT_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
-
-        data['GALAXY_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
-
-        data['REST_FRAMEWORK_AUTHENTICATION_CLASSES'] = [
-            "rest_framework.authentication.SessionAuthentication",
-            "rest_framework.authentication.TokenAuthentication",
-            "rest_framework.authentication.BasicAuthentication",
-        ]
 
         # Override the get_username and create_user steps
         # to conform to our super special user validation
