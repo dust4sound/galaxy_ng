@@ -11,6 +11,7 @@ from galaxykit.collections import delete_collection
 from galaxykit.groups import get_group_id
 from galaxykit.namespaces import create_namespace
 from galaxykit.utils import GalaxyClientError
+from galaxykit.users import get_user
 from .constants import USERNAME_PUBLISHER, GALAXY_STAGE_ANSIBLE_PROFILES
 from .utils import (
     ansible_galaxy,
@@ -72,6 +73,7 @@ slow_in_cloud: tests that take too long to be run against stage
 max_hub_version: This marker takes an argument that indicates the maximum hub version
 min_hub_version: This marker takes an argument that indicates the minimum hub version
 iqe_rbac_test: imported iqe tests checking role permissions
+iqe_ldap: imported iqe tests checking ldap integration
 sync: sync tests against stage
 certified_sync: sync tests container against container
 auto_approve: run tests that require AUTO_APPROVE to be set to true
@@ -582,3 +584,41 @@ def pytest_collection_modifyitems(items, config):
     for item in items:
         if not any(item.iter_markers()):
             item.add_marker("all")
+
+
+@pytest.fixture(scope="session")
+def skip_if_ldap_disabled(ansible_config):
+    config = ansible_config("admin")
+    client = get_client(config)
+    resp = client("_ui/v1/settings/")
+    try:
+        ldap_enabled = resp["GALAXY_AUTH_LDAP_ENABLED"]
+        if not ldap_enabled:
+            pytest.skip("This test can only be run if LDAP is enabled")
+    except KeyError:
+        pytest.skip("This test can only be run if LDAP is enabled")
+
+
+@pytest.fixture
+def ldap_user(galaxy_client, request):
+    def _(name):
+        ldap_password = "Th1sP4ssd"
+        user = {"username": name, "password": ldap_password}
+
+        def clean_test_user_and_groups():
+            gc = galaxy_client("admin")
+            _user = get_user(gc, name)
+            for group in _user["groups"]:
+                gc.delete_group(group["name"])
+            try:
+                gc.delete_user(name)
+            except GalaxyClientError as e:
+                if e.args[0] == 403:
+                    logger.debug(f"user {name} is superuser and can't be deleted")
+                else:
+                    raise e
+
+        request.addfinalizer(clean_test_user_and_groups)
+        return user
+
+    return _
